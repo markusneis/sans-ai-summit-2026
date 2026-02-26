@@ -1,0 +1,47 @@
+name: Generate Metasploit Module CSV
+
+on:
+  schedule:
+    # Run daily at 06:00 UTC
+    - cron: "0 6 * * *"
+  workflow_dispatch: # Allow manual runs
+
+permissions:
+  contents: write
+
+jobs:
+  generate-csv:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Checkout Metasploit modules
+        uses: actions/checkout@v4
+        with:
+          repository: rapid7/metasploit-framework
+          sparse-checkout: modules
+          path: metasploit-framework
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Generate CSV
+        run: python scripts/parse_metasploit_modules.py metasploit-framework/modules
+
+      - name: Check for changes
+        id: diff
+        run: |
+          git add requirements/metasploit-modules.csv
+          git diff --cached --quiet requirements/metasploit-modules.csv && echo "changed=false" >> "$GITHUB_OUTPUT" || echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push updated CSV
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update metasploit-modules.csv [skip ci]"
+          git push
