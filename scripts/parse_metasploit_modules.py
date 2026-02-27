@@ -10,6 +10,7 @@ Columns: path, module_type, cve, rank, disclosure_date, module_code,
 
 import base64
 import csv
+import gzip
 import os
 import re
 import sys
@@ -46,6 +47,7 @@ MODULES_DIR = "modules"
 CSV_COLUMNS = [
     "path", "module_type", "cve", "rank", "disclosure_date",
     "name", "description", "references", "platform", "privileged",
+    "module_code_codec",
     "module_code",
 ]
 
@@ -112,11 +114,12 @@ def parse_module(filepath):
     priv_match = PRIVILEGED_PATTERN.search(content)
     privileged = priv_match.group(1) if priv_match else ""
 
-    # Base64-encode the full source so the CSV is never broken by quotes,
-    # backslashes, or newlines inside Ruby code
-    module_code_b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
+    # Gzip + base64 encode the full source so the CSV is robust and compact
+    # even with quotes, backslashes, and newlines in Ruby code.
+    module_code_b64 = base64.b64encode(gzip.compress(content.encode("utf-8"))).decode("ascii")
+    module_code_codec = "gzip+base64"
 
-    return cve_str, rank, disclosure_date, name, description, references, platform, privileged, module_code_b64
+    return cve_str, rank, disclosure_date, name, description, references, platform, privileged, module_code_codec, module_code_b64
 
 
 def collect_modules(modules_dir):
@@ -128,7 +131,7 @@ def collect_modules(modules_dir):
                 continue
             filepath = os.path.join(root, fname)
             module_type = infer_module_type(filepath)
-            cve, rank, disclosure_date, name, description, references, platform, privileged, module_code = parse_module(filepath)
+            cve, rank, disclosure_date, name, description, references, platform, privileged, module_code_codec, module_code = parse_module(filepath)
             rows.append(
                 {
                     "path": filepath,
@@ -141,6 +144,7 @@ def collect_modules(modules_dir):
                     "references": references,
                     "platform": platform,
                     "privileged": privileged,
+                    "module_code_codec": module_code_codec,
                     "module_code": module_code,
                 }
             )
