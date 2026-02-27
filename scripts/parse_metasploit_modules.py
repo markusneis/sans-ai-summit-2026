@@ -4,7 +4,8 @@
 Traverses the modules/ directory tree, extracts metadata from each Ruby
 module file, and writes the results to requirements/metasploit-modules.csv.
 
-Columns: path, module_type, cve, rank, disclosure_date
+Columns: path, module_type, cve, rank, disclosure_date, module_code,
+         name, description, references, platform, privileged
 """
 
 import csv
@@ -19,11 +20,33 @@ RANK_PATTERN = re.compile(r"""Rank\s*=\s*(\w+)Ranking""")
 DISCLOSURE_DATE_PATTERN = re.compile(
     r"""['"]DisclosureDate['"].*?['"]([^'"]+)['"]"""
 )
-
+NAME_PATTERN = re.compile(
+    r"""['"']Name['"']\s*=>\s*['"']([^'"']+)['"']"""
+)
+DESCRIPTION_PATTERN = re.compile(
+    r"""['"']Description['"']\s*=>\s*%q\{(.*?)\}""", re.DOTALL
+)
+DESCRIPTION_SIMPLE_PATTERN = re.compile(
+    r"""['"']Description['"']\s*=>\s*['"']([^'"']+)['"']"""
+)
+# Matches individual reference entries: ['TYPE', 'value']
+REFERENCE_ENTRY_PATTERN = re.compile(
+    r"""\[\s*['"'](\w+)['"']\s*,\s*['"']([^'"']+)['"']\s*\]"""
+)
+PLATFORM_PATTERN = re.compile(
+    r"""['"']Platform['"']\s*=>\s*(?:\[([^\]]+)\]|['"']([^'"']+)['"'])"""
+)
+PRIVILEGED_PATTERN = re.compile(
+    r"""['"']Privileged['"']\s*=>\s*(true|false)"""
+)
 OUTPUT_CSV = os.path.join("requirements", "metasploit-modules.csv")
 MODULES_DIR = "modules"
 
-CSV_COLUMNS = ["path", "module_type", "cve", "rank", "disclosure_date"]
+CSV_COLUMNS = [
+    "path", "module_type", "cve", "rank", "disclosure_date",
+    "name", "description", "references", "platform", "privileged",
+    "module_code",
+]
 
 
 def infer_module_type(filepath):
@@ -44,12 +67,12 @@ def infer_module_type(filepath):
 
 
 def parse_module(filepath):
-    """Extract CVE, rank, and disclosure_date from a module file."""
+    """Extract metadata and full source from a module file."""
     try:
         with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
             content = fh.read()
     except OSError:
-        return [], "", ""
+        return "", "", "", "", "", "", "", "", ""
 
     cves = CVE_PATTERN.findall(content)
     cve_str = "; ".join(f"CVE-{c}" for c in cves) if cves else ""
@@ -60,7 +83,35 @@ def parse_module(filepath):
     date_match = DISCLOSURE_DATE_PATTERN.search(content)
     disclosure_date = date_match.group(1) if date_match else ""
 
-    return cve_str, rank, disclosure_date
+    name_match = NAME_PATTERN.search(content)
+    name = name_match.group(1).strip() if name_match else ""
+
+    desc_match = DESCRIPTION_PATTERN.search(content)
+    if desc_match:
+        description = " ".join(desc_match.group(1).split())
+    else:
+        desc_simple = DESCRIPTION_SIMPLE_PATTERN.search(content)
+        description = desc_simple.group(1).strip() if desc_simple else ""
+
+    ref_entries = REFERENCE_ENTRY_PATTERN.findall(content)
+    references = "; ".join(f"{rtype}:{rval}" for rtype, rval in ref_entries) if ref_entries else ""
+
+    plat_match = PLATFORM_PATTERN.search(content)
+    if plat_match:
+        raw_plat = plat_match.group(1) or plat_match.group(2) or ""
+        # Strip quotes and whitespace from each entry in array form
+        platform = "; ".join(
+            p.strip().strip("'\"")
+            for p in re.split(r"[,\s]+", raw_plat.strip())
+            if p.strip().strip("'\"")
+        )
+    else:
+        platform = ""
+
+    priv_match = PRIVILEGED_PATTERN.search(content)
+    privileged = priv_match.group(1) if priv_match else ""
+
+    return cve_str, rank, disclosure_date, name, description, references, platform, privileged, content
 
 
 def collect_modules(modules_dir):
@@ -72,7 +123,7 @@ def collect_modules(modules_dir):
                 continue
             filepath = os.path.join(root, fname)
             module_type = infer_module_type(filepath)
-            cve, rank, disclosure_date = parse_module(filepath)
+            cve, rank, disclosure_date, name, description, references, platform, privileged, module_code = parse_module(filepath)
             rows.append(
                 {
                     "path": filepath,
@@ -80,6 +131,12 @@ def collect_modules(modules_dir):
                     "cve": cve,
                     "rank": rank,
                     "disclosure_date": disclosure_date,
+                    "name": name,
+                    "description": description,
+                    "references": references,
+                    "platform": platform,
+                    "privileged": privileged,
+                    "module_code": module_code,
                 }
             )
     rows.sort(key=lambda r: r["path"])
