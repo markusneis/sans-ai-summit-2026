@@ -8,6 +8,7 @@ Columns: path, module_type, cve, rank, disclosure_date, module_code,
          name, description, references, platform, privileged
 """
 
+import base64
 import csv
 import os
 import re
@@ -111,7 +112,11 @@ def parse_module(filepath):
     priv_match = PRIVILEGED_PATTERN.search(content)
     privileged = priv_match.group(1) if priv_match else ""
 
-    return cve_str, rank, disclosure_date, name, description, references, platform, privileged, content
+    # Base64-encode the full source so the CSV is never broken by quotes,
+    # backslashes, or newlines inside Ruby code
+    module_code_b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
+
+    return cve_str, rank, disclosure_date, name, description, references, platform, privileged, module_code_b64
 
 
 def collect_modules(modules_dir):
